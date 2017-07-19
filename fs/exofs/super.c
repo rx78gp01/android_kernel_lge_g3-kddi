@@ -206,11 +206,6 @@ static int init_inodecache(void)
  */
 static void destroy_inodecache(void)
 {
-	/*
-	 * Make sure all delayed rcu free inodes are flushed before we
-	 * destroy cache.
-	 */
-	rcu_barrier();
 	kmem_cache_destroy(exofs_inode_cachep);
 }
 
@@ -750,7 +745,6 @@ static int exofs_fill_super(struct super_block *sb, void *data, int silent)
 	sbi->one_comp.obj.partition = opts->pid;
 	sbi->one_comp.obj.id = 0;
 	exofs_make_credential(sbi->one_comp.cred, &sbi->one_comp.obj);
-	sbi->oc.numdevs = 1;
 	sbi->oc.single_comp = EC_SINGLE_COMP;
 	sbi->oc.comps = &sbi->one_comp;
 
@@ -809,6 +803,7 @@ static int exofs_fill_super(struct super_block *sb, void *data, int silent)
 			goto free_sbi;
 
 		ore_comp_set_dev(&sbi->oc, 0, od);
+		sbi->oc.numdevs = 1;
 	}
 
 	__sbi_read_stats(sbi);
