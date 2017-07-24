@@ -1304,7 +1304,7 @@ static ssize_t subbuf_splice_actor(struct file *in,
 
 out:
 	splice_shrink_spd(&spd);
-        return ret;
+	return ret;
 }
 
 static ssize_t relay_file_splice_read(struct file *in,
