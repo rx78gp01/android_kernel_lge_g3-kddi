@@ -25,7 +25,6 @@
 #include <linux/suspend.h>
 #include <linux/syscore_ops.h>
 #include <linux/rtc.h>
-#include <linux/ftrace.h>
 #include <trace/events/power.h>
 
 #include "power.h"
@@ -217,7 +216,6 @@ int suspend_devices_and_enter(suspend_state_t state)
 			goto Close;
 	}
 	suspend_console();
-	ftrace_stop();
 	suspend_test_start();
 	error = dpm_suspend_start(PMSG_SUSPEND);
 	if (error) {
@@ -237,7 +235,6 @@ int suspend_devices_and_enter(suspend_state_t state)
 	suspend_test_start();
 	dpm_resume_end(PMSG_RESUME);
 	suspend_test_finish("resume devices");
-	ftrace_start();
 	resume_console();
  Close:
 	if (suspend_ops->end)
@@ -326,6 +323,10 @@ static void pm_suspend_marker(char *annotation)
  * Check if the value of @state represents one of the supported states,
  * execute enter_state() and update system suspend statistics.
  */
+#if defined(CONFIG_MACH_MSM8974_B1_KR) || defined(CONFIG_MACH_MSM8974_B1W)
+bool suspend_marker_entry = false;
+#endif
+
 int pm_suspend(suspend_state_t state)
 {
 	int error;
@@ -334,6 +335,9 @@ int pm_suspend(suspend_state_t state)
 		return -EINVAL;
 
 	pm_suspend_marker("entry");
+#if defined(CONFIG_MACH_MSM8974_B1_KR) || defined(CONFIG_MACH_MSM8974_B1W)
+	suspend_marker_entry = true;
+#endif
 	error = enter_state(state);
 	if (error) {
 		suspend_stats.fail++;
@@ -342,6 +346,9 @@ int pm_suspend(suspend_state_t state)
 		suspend_stats.success++;
 	}
 	pm_suspend_marker("exit");
+#if defined(CONFIG_MACH_MSM8974_B1_KR) || defined(CONFIG_MACH_MSM8974_B1W)
+	suspend_marker_entry = false;
+#endif
 	return error;
 }
 EXPORT_SYMBOL(pm_suspend);

@@ -152,7 +152,6 @@ extern void sched_update_nr_prod(int cpu, unsigned long nr, bool inc);
 extern void sched_get_nr_running_avg(int *avg, int *iowait_avg);
 
 extern void calc_global_load(unsigned long ticks);
-extern void update_cpu_load_nohz(void);
 
 extern unsigned long get_parent_ip(unsigned long addr);
 
@@ -543,7 +542,6 @@ struct signal_struct {
 	atomic_t		sigcnt;
 	atomic_t		live;
 	int			nr_threads;
-	struct list_head	thread_head;
 
 	wait_queue_head_t	wait_chldexit;	/* for wait4() */
 
@@ -1249,7 +1247,6 @@ struct sched_entity {
 struct sched_rt_entity {
 	struct list_head run_list;
 	unsigned long timeout;
-	unsigned long watchdog_stamp;
 	unsigned int time_slice;
 	int nr_cpus_allowed;
 
@@ -1296,9 +1293,6 @@ struct task_struct {
 	const struct sched_class *sched_class;
 	struct sched_entity se;
 	struct sched_rt_entity rt;
-#ifdef CONFIG_CGROUP_SCHED
-	struct task_group *sched_task_group;
-#endif
 
 #ifdef CONFIG_PREEMPT_NOTIFIERS
 	/* list of struct preempt_notifier: */
@@ -1370,7 +1364,6 @@ struct task_struct {
 	/* IRQ handler threads */
 	unsigned irq_thread:1;
 #endif
-	unsigned long atomic_flags; /* Flags needing atomic access. */
 
 	pid_t pid;
 	pid_t tgid;
@@ -1405,7 +1398,6 @@ struct task_struct {
 	/* PID/PID hash table linkage. */
 	struct pid_link pids[PIDTYPE_MAX];
 	struct list_head thread_group;
-	struct list_head thread_node;
 
 	struct completion *vfork_done;		/* for vfork() */
 	int __user *set_child_tid;		/* CLONE_CHILD_SETTID */
@@ -1852,6 +1844,8 @@ extern int task_free_unregister(struct notifier_block *n);
 #define PF_KTHREAD	0x00200000	/* I am a kernel thread */
 #define PF_RANDOMIZE	0x00400000	/* randomize virtual address space */
 #define PF_SWAPWRITE	0x00800000	/* Allowed to write to swap */
+#define PF_SPREAD_PAGE	0x01000000	/* Spread page cache over cpuset */
+#define PF_SPREAD_SLAB	0x02000000	/* Spread some slab caches over cpuset */
 #define PF_THREAD_BOUND	0x04000000	/* Thread bound to specific cpu */
 #define PF_MCE_EARLY    0x08000000      /* Early kill for mce process policy */
 #define PF_MEMPOLICY	0x10000000	/* Non-default NUMA mempolicy */
@@ -1884,20 +1878,6 @@ extern int task_free_unregister(struct notifier_block *n);
 /* NOTE: this will return 0 or PF_USED_MATH, it will never return 1 */
 #define tsk_used_math(p) ((p)->flags & PF_USED_MATH)
 #define used_math() tsk_used_math(current)
-
-/* Per-process atomic flags. */
-#define PFA_SPREAD_PAGE  1      /* Spread page cache over cpuset */
-#define PFA_SPREAD_SLAB  2      /* Spread some slab caches over cpuset */
-
-#define TASK_PFA_TEST(name, func)					\
-	static inline bool task_##func(struct task_struct *p)		\
-	{ return test_bit(PFA_##name, &p->atomic_flags); }
-#define TASK_PFA_SET(name, func)					\
-	static inline void task_set_##func(struct task_struct *p)	\
-	{ set_bit(PFA_##name, &p->atomic_flags); }
-#define TASK_PFA_CLEAR(name, func)					\
-	static inline void task_clear_##func(struct task_struct *p)	\
-	{ clear_bit(PFA_##name, &p->atomic_flags); }
 
 /*
  * task->jobctl flags
@@ -1975,14 +1955,6 @@ static inline int set_cpus_allowed_ptr(struct task_struct *p,
 }
 #endif
 
-#ifdef CONFIG_NO_HZ
-void calc_load_enter_idle(void);
-void calc_load_exit_idle(void);
-#else
-static inline void calc_load_enter_idle(void) { }
-static inline void calc_load_exit_idle(void) { }
-#endif /* CONFIG_NO_HZ */
-
 static inline void set_wake_up_idle(bool enabled)
 {
 	if (enabled)
@@ -1997,14 +1969,6 @@ static inline int set_cpus_allowed(struct task_struct *p, cpumask_t new_mask)
 	return set_cpus_allowed_ptr(p, &new_mask);
 }
 #endif
-
-TASK_PFA_TEST(SPREAD_PAGE, spread_page)
-TASK_PFA_SET(SPREAD_PAGE, spread_page)
-TASK_PFA_CLEAR(SPREAD_PAGE, spread_page)
-
-TASK_PFA_TEST(SPREAD_SLAB, spread_slab)
-TASK_PFA_SET(SPREAD_SLAB, spread_slab)
-TASK_PFA_CLEAR(SPREAD_SLAB, spread_slab)
 
 /*
  * Do not use outside of architecture code which knows its limitations.
@@ -2426,16 +2390,6 @@ extern bool current_is_single_threaded(void);
 #define while_each_thread(g, t) \
 	while ((t = next_thread(t)) != g)
 
-#define __for_each_thread(signal, t)	\
-	list_for_each_entry_rcu(t, &(signal)->thread_head, thread_node)
-
-#define for_each_thread(p, t)		\
-	__for_each_thread((p)->signal, t)
-
-/* Careful: this is a double loop, 'break' won't work as expected. */
-#define for_each_process_thread(p, t)	\
-	for_each_process(p) for_each_thread(p, t)
-
 static inline int get_nr_threads(struct task_struct *tsk)
 {
 	return tsk->signal->nr_threads;
@@ -2814,7 +2768,7 @@ extern int sched_group_set_rt_period(struct task_group *tg,
 extern long sched_group_rt_period(struct task_group *tg);
 extern int sched_rt_can_attach(struct task_group *tg, struct task_struct *tsk);
 #endif
-#endif /* CONFIG_CGROUP_SCHED */
+#endif
 
 extern int task_can_switch_user(struct user_struct *up,
 					struct task_struct *tsk);
